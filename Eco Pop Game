@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Eco Pop - Das Energie-Puzzle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&display=swap');
+        
+        :root {
+            --bg: #e0e7ff;
+            --primary: #6366f1;
+            --secondary: #a5b4fc;
+        }
+
+        body {
+            font-family: 'Quicksand', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: var(--bg);
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 500px;
+            max-height: 800px;
+            background: #f8fafc;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 640px) {
+            #app-container {
+                border-radius: 2rem;
+                height: 90vh;
+            }
+        }
+
+        canvas {
+            flex-grow: 1;
+            touch-action: none;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 1.5rem;
+        }
+
+        .btn-main {
+            background: var(--primary);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 1rem;
+            font-weight: 700;
+            box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3);
+            transition: all 0.2s;
+        }
+
+        .btn-main:active {
+            transform: scale(0.95);
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <!-- Header / HUD -->
+    <div class="p-6 flex justify-between items-center z-10">
+        <div>
+            <p class="text-xs font-bold text-indigo-400 uppercase tracking-widest">Punkte</p>
+            <h2 id="scoreDisplay" class="text-3xl font-bold text-indigo-900">0</h2>
+        </div>
+        <div class="text-right">
+            <p class="text-xs font-bold text-indigo-400 uppercase tracking-widest">Bester</p>
+            <h2 id="highScoreDisplay" class="text-xl font-bold text-indigo-800">0</h2>
+        </div>
+    </div>
+
+    <!-- Spielfeld -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Overlays -->
+    <div id="overlay" class="absolute inset-0 flex items-center justify-center p-8 z-20">
+        <!-- Start Menü -->
+        <div id="startMenu" class="glass-panel p-8 w-full text-center shadow-xl">
+            <div class="mb-6 inline-block p-4 bg-indigo-100 rounded-2xl">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <h1 class="text-3xl font-bold text-indigo-900 mb-2">Eco Pop</h1>
+            <p class="text-indigo-600/70 mb-8">Sammle die Kerne, bevor sie zu groß werden!</p>
+            <button onclick="startGame()" class="btn-main w-full">SPIEL STARTEN</button>
+        </div>
+
+        <!-- Game Over Menü -->
+        <div id="gameOverMenu" class="glass-panel p-8 w-full text-center shadow-xl hidden">
+            <h2 class="text-2xl font-bold text-red-600 mb-2">Spiel Ende</h2>
+            <p id="finalScore" class="text-indigo-900 font-bold text-4xl mb-6">0</p>
+            <button onclick="startGame()" class="btn-main w-full">NOCHMAL</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const highScoreDisplay = document.getElementById('highScoreDisplay');
+    const overlay = document.getElementById('overlay');
+    const startMenu = document.getElementById('startMenu');
+    const gameOverMenu = document.getElementById('gameOverMenu');
+    const finalScoreDisplay = document.getElementById('finalScore');
+
+    let gameActive = false;
+    let score = 0;
+    let highScore = localStorage.getItem('ecoPopHighScore') || 0;
+    highScoreDisplay.innerText = highScore;
+
+    let particles = [];
+    let cores = [];
+    let spawnTimer = 0;
+
+    const COLORS = [
+        '#6366f1', // Indigo
+        '#10b981', // Emerald
+        '#f59e0b', // Amber
+        '#ec4899'  // Pink
+    ];
+
+    class Core {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.radius = 5;
+            this.maxRadius = 60 + Math.random() * 40;
+            this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+            this.growth = 0.2 + (score * 0.005);
+            this.isPopping = false;
+        }
+
+        update() {
+            if (!this.isPopping) {
+                this.radius += this.growth;
+                if (this.radius >= this.maxRadius) {
+                    return true; // Game Over Trigger
+                }
+            }
+            return false;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            
+            // Schöner Gradient für den "Kern"
+            let grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+            grad.addColorStop(0, '#fff');
+            grad.addColorStop(0.3, this.color);
+            grad.addColorStop(1, this.color + '66');
+            
+            ctx.fillStyle = grad;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = this.color;
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.radius = Math.random() * 4 + 2;
+            this.vx = (Math.random() - 0.5) * 10;
+            this.vy = (Math.random() - 0.5) * 10;
+            this.alpha = 1;
+        }
+
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.alpha -= 0.03;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    function resize() {
+        const container = document.getElementById('app-container');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight - 80; // Abzug für Header
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+
+    function startGame() {
+        score = 0;
+        cores = [];
+        particles = [];
+        gameActive = true;
+        scoreDisplay.innerText = "0";
+        overlay.classList.add('hidden');
+        startMenu.classList.add('hidden');
+        gameOverMenu.classList.add('hidden');
+        spawnTimer = 0;
+        requestAnimationFrame(gameLoop);
+    }
+
+    function endGame() {
+        gameActive = false;
+        if (score > highScore) {
+            highScore = score;
+            localStorage.setItem('ecoPopHighScore', highScore);
+            highScoreDisplay.innerText = highScore;
+        }
+        finalScoreDisplay.innerText = score;
+        overlay.classList.remove('hidden');
+        gameOverMenu.classList.remove('hidden');
+    }
+
+    function handleInput(ex, ey) {
+        if (!gameActive) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = ex - rect.left;
+        const mouseY = ey - rect.top;
+
+        for (let i = cores.length - 1; i >= 0; i--) {
+            const core = cores[i];
+            const dx = mouseX - core.x;
+            const dy = mouseY - core.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < core.radius + 20) {
+                // Treffer!
+                createExplosion(core.x, core.y, core.color);
+                cores.splice(i, 1);
+                score++;
+                scoreDisplay.innerText = score;
+                break; // Nur einen Kern pro Klick löschen
+            }
+        }
+    }
+
+    function createExplosion(x, y, color) {
+        for (let i = 0; i < 15; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    canvas.addEventListener('mousedown', (e) => handleInput(e.clientX, e.clientY));
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        handleInput(e.touches[0].clientX, e.touches[0].clientY);
+    }, {passive: false});
+
+    function gameLoop() {
+        if (!gameActive) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Hintergrund-Dekoration (sanftes Pulsieren)
+        ctx.fillStyle = 'rgba(99, 102, 241, 0.03)';
+        ctx.beginPath();
+        ctx.arc(canvas.width/2, canvas.height/2, 100 + Math.sin(Date.now()/500)*20, 0, Math.PI*2);
+        ctx.fill();
+
+        // Spawning
+        spawnTimer++;
+        let spawnRate = Math.max(20, 60 - Math.floor(score/3));
+        if (spawnTimer >= spawnRate) {
+            const padding = 50;
+            const rx = padding + Math.random() * (canvas.width - padding * 2);
+            const ry = padding + Math.random() * (canvas.height - padding * 2);
+            cores.push(new Core(rx, ry));
+            spawnTimer = 0;
+        }
+
+        // Update Cores
+        for (let i = cores.length - 1; i >= 0; i--) {
+            const core = cores[i];
+            const isDead = core.update();
+            core.draw();
+
+            if (isDead) {
+                endGame();
+                return;
+            }
+        }
+
+        // Update Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.update();
+            p.draw();
+            if (p.alpha <= 0) particles.splice(i, 1);
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+</script>
+
+</body>
+</html>
