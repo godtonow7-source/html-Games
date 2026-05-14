@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Racer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #game-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #0f172a;
+        }
+
+        canvas {
+            display: block;
+            background: #0f172a;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 20;
+        }
+
+        .hud {
+            position: absolute;
+            top: env(safe-area-inset-top, 20px);
+            left: env(safe-area-inset-left, 20px);
+            pointer-events: none;
+            z-index: 30;
+        }
+
+        .menu-card {
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            text-align: center;
+            pointer-events: auto;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            max-width: 90%;
+            width: 350px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            padding: 1rem 2rem;
+            border-radius: 9999px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: none;
+            color: white;
+            margin-top: 1.5rem;
+            display: inline-block;
+            font-size: 1.1rem;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Touch-Zonen Indikatoren (nur kurz sichtbar beim Start) */
+        .touch-hint {
+            position: absolute;
+            bottom: 10%;
+            width: 40%;
+            height: 20%;
+            border: 2px dashed rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            pointer-events: none;
+            animation: fadeOutHint 3s forwards;
+        }
+        .hint-left { left: 5%; }
+        .hint-right { right: 5%; }
+
+        @keyframes fadeOutHint {
+            0% { opacity: 1; }
+            70% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        .hidden { display: none !important; }
+
+        .score-anim {
+            animation: pulse 0.3s ease-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); color: #60a5fa; }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="touchHints" class="hidden">
+        <div class="touch-hint hint-left">Links</div>
+        <div class="touch-hint hint-right">Rechts</div>
+    </div>
+
+    <!-- HUD -->
+    <div class="hud">
+        <div class="text-gray-400 text-[10px] uppercase tracking-widest font-bold">Punkte</div>
+        <div id="scoreDisplay" class="text-3xl font-black">0</div>
+        <div class="mt-2 text-gray-400 text-[10px] uppercase tracking-widest font-bold">Bestwert</div>
+        <div id="highScoreDisplay" class="text-lg font-bold text-blue-400">0</div>
+    </div>
+
+    <!-- UI Overlay -->
+    <div class="ui-overlay">
+        <!-- Start Menü -->
+        <div id="startMenu" class="menu-card">
+            <h1 class="text-3xl font-black mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+                NEON RACER
+            </h1>
+            <p class="text-gray-400 text-sm mb-6">Weiche den roten Blöcken aus.</p>
+            <div class="space-y-2 text-xs text-gray-500 mb-6 bg-slate-900/50 p-4 rounded-xl">
+                <p>Tablet: <b>Links oder Rechts tippen</b></p>
+                <p>PC: <b>Pfeiltasten</b> oder <b>A/D</b></p>
+            </div>
+            <button class="btn w-full" onclick="startGame()">JETZT SPIELEN</button>
+        </div>
+
+        <!-- Game Over Menü -->
+        <div id="gameOverMenu" class="menu-card hidden">
+            <h2 class="text-3xl font-black mb-2 text-red-500">CRASH!</h2>
+            <p id="finalScoreText" class="text-xl mb-6">Punkte: 0</p>
+            <button class="btn w-full" onclick="startGame()">NOCHMAL</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const highScoreDisplay = document.getElementById('highScoreDisplay');
+    const startMenu = document.getElementById('startMenu');
+    const gameOverMenu = document.getElementById('gameOverMenu');
+    const finalScoreText = document.getElementById('finalScoreText');
+    const touchHints = document.getElementById('touchHints');
+
+    // Game State
+    let gameActive = false;
+    let score = 0;
+    let highScore = 0;
+    let player, obstacles, particles;
+    let animationId;
+    let speedMultiplier = 1;
+
+    // Configuration
+    const LANE_COUNT = 3;
+    const COLORS = {
+        player: '#3b82f6',
+        obstacle: '#ef4444',
+        accent: '#8b5cf6',
+        bg: '#0f172a',
+        lane: 'rgba(255, 255, 255, 0.05)'
+    };
+
+    class Player {
+        constructor() {
+            this.width = 45;
+            this.height = 65;
+            this.lane = 1; 
+            this.x = 0;
+            this.y = 0;
+            this.targetX = 0;
+            this.lerpSpeed = 0.15;
+        }
+
+        update() {
+            const laneWidth = canvas.width / LANE_COUNT;
+            this.targetX = this.lane * laneWidth + (laneWidth / 2);
+            this.y = canvas.height - 120;
+            
+            // Smooth LERP movement for high refresh rate screens
+            this.x += (this.targetX - this.x) * this.lerpSpeed;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = COLORS.player;
+            
+            // Ship Body
+            ctx.fillStyle = COLORS.player;
+            ctx.beginPath();
+            ctx.moveTo(this.x, this.y - this.height/2);
+            ctx.lineTo(this.x - this.width/2, this.y + this.height/2);
+            ctx.lineTo(this.x, this.y + this.height/3); // Tail notch
+            ctx.lineTo(this.x + this.width/2, this.y + this.height/2);
+            ctx.closePath();
+            ctx.fill();
+
+            // Cockpit
+            ctx.fillStyle = '#fff';
+            ctx.globalAlpha = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(this.x, this.y - 15);
+            ctx.lineTo(this.x - 6, this.y + 5);
+            ctx.lineTo(this.x + 6, this.y + 5);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.restore();
+        }
+    }
+
+    class Obstacle {
+        constructor() {
+            const laneWidth = canvas.width / LANE_COUNT;
+            this.lane = Math.floor(Math.random() * LANE_COUNT);
+            this.width = laneWidth * 0.7;
+            this.height = 35;
+            this.x = this.lane * laneWidth + (laneWidth / 2);
+            this.y = -100;
+            this.speed = (5 + Math.random() * 3) * speedMultiplier;
+        }
+
+        update() {
+            this.y += this.speed;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = COLORS.obstacle;
+            ctx.fillStyle = COLORS.obstacle;
+            
+            const r = 8;
+            ctx.beginPath();
+            ctx.roundRect(this.x - this.width/2, this.y - this.height/2, this.width, this.height, r);
+            ctx.fill();
+            
+            // Visual detail on obstacle
+            ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.x - this.width/4, this.y - this.height/4, this.width/2, this.height/2);
+            
+            ctx.restore();
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            const angle = Math.random() * Math.PI * 2;
+            const force = Math.random() * 8 + 2;
+            this.vx = Math.cos(angle) * force;
+            this.vy = Math.sin(angle) * force;
+            this.alpha = 1;
+            this.color = color;
+            this.size = Math.random() * 5 + 2;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.alpha -= 0.02;
+        }
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        if (player) {
+            const laneWidth = canvas.width / LANE_COUNT;
+            player.x = player.lane * laneWidth + (laneWidth / 2);
+        }
+    }
+
+    function init() {
+        resize();
+        player = new Player();
+        obstacles = [];
+        particles = [];
+        score = 0;
+        speedMultiplier = 1;
+        updateScore(false);
+    }
+
+    function startGame() {
+        init();
+        gameActive = true;
+        startMenu.classList.add('hidden');
+        gameOverMenu.classList.add('hidden');
+        touchHints.classList.remove('hidden');
+        animate();
+    }
+
+    function endGame() {
+        gameActive = false;
+        cancelAnimationFrame(animationId);
+        if (score > highScore) {
+            highScore = score;
+            highScoreDisplay.innerText = highScore;
+        }
+        finalScoreText.innerText = `Punkte: ${score}`;
+        gameOverMenu.classList.remove('hidden');
+        touchHints.classList.add('hidden');
+    }
+
+    function updateScore(animate = true) {
+        scoreDisplay.innerText = score;
+        if (animate) {
+            scoreDisplay.classList.remove('score-anim');
+            void scoreDisplay.offsetWidth; 
+            scoreDisplay.classList.add('score-anim');
+        }
+    }
+
+    function drawBackground() {
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Grid/Lane lines
+        ctx.strokeStyle = COLORS.lane;
+        ctx.lineWidth = 2;
+        for(let i = 0; i <= LANE_COUNT; i++) {
+            const x = (canvas.width / LANE_COUNT) * i;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
+    }
+
+    function animate() {
+        if (!gameActive) return;
+        
+        drawBackground();
+        
+        // Player
+        player.update();
+        player.draw();
+
+        // Obstacle Spawning
+        if (Math.random() < 0.025 * speedMultiplier) {
+            obstacles.push(new Obstacle());
+        }
+
+        // Obstacles logic
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            const obs = obstacles[i];
+            obs.update();
+            obs.draw();
+
+            // Collision Detection
+            const dx = Math.abs(obs.x - player.x);
+            const dy = Math.abs(obs.y - player.y);
+            
+            if (dx < (obs.width/2 + player.width/3) && dy < (obs.height/2 + player.height/3)) {
+                // Explosion
+                for(let j=0; j<30; j++) particles.push(new Particle(player.x, player.y, COLORS.player));
+                for(let j=0; j<30; j++) particles.push(new Particle(obs.x, obs.y, COLORS.obstacle));
+                endGame();
+                return;
+            }
+
+            // Scored
+            if (obs.y > canvas.height + 100) {
+                obstacles.splice(i, 1);
+                score++;
+                updateScore();
+                speedMultiplier += 0.005;
+            }
+        }
+
+        // Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update();
+            particles[i].draw();
+            if (particles[i].alpha <= 0) particles.splice(i, 1);
+        }
+
+        animationId = requestAnimationFrame(animate);
+    }
+
+    // Controls
+    function moveLeft() {
+        if (player.lane > 0) player.lane--;
+    }
+
+    function moveRight() {
+        if (player.lane < LANE_COUNT - 1) player.lane++;
+    }
+
+    // Keyboard
+    window.addEventListener('keydown', (e) => {
+        if (!gameActive) return;
+        if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') moveLeft();
+        if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') moveRight();
+    });
+
+    // Touch (Universal for Tablet/Phone)
+    window.addEventListener('touchstart', (e) => {
+        if (!gameActive) return;
+        e.preventDefault();
+        const touchX = e.touches[0].clientX;
+        if (touchX < window.innerWidth / 2) {
+            moveLeft();
+        } else {
+            moveRight();
+        }
+    }, { passive: false });
+
+    // Handle Resize/Orientation
+    window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', () => {
+        setTimeout(resize, 100);
+    });
+
+    // Initial
+    init();
+</script>
+
+</body>
+</html>
