@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Orbital Shield - Core Defense</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;600;900&display=swap');
+        
+        body {
+            font-family: 'Lexend', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            touch-action: none;
+            color: white;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1.5rem;
+            z-index: 10;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.5rem;
+            padding: 1rem;
+            pointer-events: auto;
+        }
+
+        #core-health-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        #health-fill {
+            height: 100%;
+            width: 100%;
+            background: #10b981;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+
+        .hidden { display: none !important; }
+        
+        canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+        .btn-glow {
+            background: #6366f1;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+            transition: all 0.2s;
+        }
+        .btn-glow:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <!-- Status -->
+    <div class="flex justify-between items-start w-full">
+        <div class="glass-panel min-w-[120px]">
+            <span class="text-[10px] uppercase font-bold tracking-widest text-indigo-400">Score</span>
+            <div id="score" class="text-2xl font-black">0</div>
+        </div>
+        <div class="glass-panel min-w-[150px]">
+            <span class="text-[10px] uppercase font-bold tracking-widest text-emerald-400">Kern-Status</span>
+            <div id="core-health-bar"><div id="health-fill"></div></div>
+        </div>
+    </div>
+
+    <!-- Menüs -->
+    <div class="flex-1 flex items-center justify-center">
+        <div id="start-menu" class="glass-panel text-center max-w-xs pointer-events-auto">
+            <h1 class="text-4xl font-black mb-2 tracking-tight">ORBITAL<br><span class="text-indigo-500">SHIELD</span></h1>
+            <p class="text-xs opacity-60 mb-6 uppercase tracking-widest italic">Schütze den Kern</p>
+            <div class="text-sm mb-6 text-indigo-200">Ziehe den Finger, um den Schild zu drehen. Weiche Rot aus, sammle Grün.</div>
+            <button onclick="startGame()" class="w-full btn-glow text-white font-bold py-4 rounded-xl">START</button>
+        </div>
+
+        <div id="game-over" class="glass-panel text-center max-w-xs hidden pointer-events-auto">
+            <h2 class="text-2xl font-bold mb-2 text-red-400">KERN ZERSTÖRT</h2>
+            <p id="final-score" class="text-4xl font-black mb-6">0</p>
+            <button onclick="startGame()" class="w-full bg-white text-black font-bold py-4 rounded-xl">NOCHMAL</button>
+        </div>
+    </div>
+    
+    <div class="text-center opacity-30 text-[10px] uppercase tracking-widest pb-4">
+        Touch & Drag zum Steuern
+    </div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const healthFill = document.getElementById('health-fill');
+    const startMenu = document.getElementById('start-menu');
+    const gameOverMenu = document.getElementById('game-over');
+    const finalScoreEl = document.getElementById('final-score');
+
+    let gameActive = false;
+    let score = 0;
+    let health = 100;
+    let shieldAngle = 0;
+    let projectiles = [];
+    let particles = [];
+    let spawnTimer = 0;
+    let frame = 0;
+
+    const COLORS = {
+        core: '#ffffff',
+        shield: '#6366f1',
+        enemy: '#ef4444',
+        collectible: '#10b981'
+    };
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+
+    class Projectile {
+        constructor() {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.max(canvas.width, canvas.height);
+            this.x = canvas.width / 2 + Math.cos(angle) * dist;
+            this.y = canvas.height / 2 + Math.sin(angle) * dist;
+            this.type = Math.random() > 0.3 ? 'enemy' : 'collectible';
+            this.size = this.type === 'enemy' ? 6 : 8;
+            this.speed = (1.5 + Math.random() * 2) + (score / 200);
+            
+            const targetAngle = Math.atan2(canvas.height/2 - this.y, canvas.width/2 - this.x);
+            this.vx = Math.cos(targetAngle) * this.speed;
+            this.vy = Math.sin(targetAngle) * this.speed;
+        }
+
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+
+            // Kern Kollision
+            const distToCore = Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2);
+            if (distToCore < 25) {
+                if (this.type === 'enemy') {
+                    health -= 20;
+                    createExplosion(this.x, this.y, COLORS.enemy, 15);
+                } else {
+                    health = Math.min(100, health + 10);
+                    score += 5;
+                    createExplosion(this.x, this.y, COLORS.collectible, 10);
+                }
+                updateUI();
+                return true;
+            }
+
+            // Schild Kollision
+            const shieldDist = 70;
+            const shieldWidth = 1.2; // Radians
+            if (distToCore < shieldDist + 10 && distToCore > shieldDist - 10) {
+                const angleToProjectile = Math.atan2(this.y - canvas.height/2, this.x - canvas.width/2);
+                let diff = angleToProjectile - shieldAngle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+
+                if (Math.abs(diff) < shieldWidth / 2) {
+                    if (this.type === 'enemy') {
+                        score += 1;
+                        createExplosion(this.x, this.y, COLORS.shield, 8);
+                    } else {
+                        // Sammelbares Item durch Schild blockiert (Strafe)
+                        health -= 5;
+                    }
+                    updateUI();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        draw() {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = COLORS[this.type];
+            ctx.fillStyle = COLORS[this.type];
+            ctx.beginPath();
+            if (this.type === 'enemy') {
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            } else {
+                ctx.rect(this.x - this.size, this.y - this.size, this.size*2, this.size*2);
+            }
+            ctx.fill();
+        }
+    }
+
+    function createExplosion(x, y, color, count) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random()-0.5) * 10,
+                vy: (Math.random()-0.5) * 10,
+                life: 1,
+                color
+            });
+        }
+    }
+
+    function updateUI() {
+        scoreEl.innerText = score;
+        healthFill.style.width = health + '%';
+        if (health < 30) healthFill.style.background = '#ef4444';
+        else if (health < 60) healthFill.style.background = '#f59e0b';
+        else healthFill.style.background = '#10b981';
+
+        if (health <= 0 && gameActive) endGame();
+    }
+
+    function startGame() {
+        score = 0;
+        health = 100;
+        projectiles = [];
+        particles = [];
+        gameActive = true;
+        updateUI();
+        startMenu.classList.add('hidden');
+        gameOverMenu.classList.add('hidden');
+        requestAnimationFrame(gameLoop);
+    }
+
+    function endGame() {
+        gameActive = false;
+        finalScoreEl.innerText = score;
+        gameOverMenu.classList.remove('hidden');
+    }
+
+    // Touch Steuerung
+    let lastX = 0;
+    canvas.addEventListener('touchstart', e => { lastX = e.touches[0].clientX; }, {passive: false});
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        const deltaX = e.touches[0].clientX - lastX;
+        shieldAngle += deltaX * 0.015;
+        lastX = e.touches[0].clientX;
+    }, {passive: false});
+
+    // Maus Steuerung
+    canvas.addEventListener('mousemove', e => {
+        const dx = e.clientX - canvas.width/2;
+        const dy = e.clientY - canvas.height/2;
+        shieldAngle = Math.atan2(dy, dx);
+    });
+
+    function gameLoop() {
+        if (!gameActive) return;
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        // Kern zeichnen
+        ctx.shadowBlur = 20 + Math.sin(frame/10) * 10;
+        ctx.shadowColor = COLORS.core;
+        ctx.fillStyle = COLORS.core;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Schild zeichnen
+        ctx.strokeStyle = COLORS.shield;
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = COLORS.shield;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 70, shieldAngle - 0.6, shieldAngle + 0.6);
+        ctx.stroke();
+
+        // Projectiles
+        spawnTimer++;
+        if (spawnTimer > Math.max(10, 40 - score/10)) {
+            projectiles.push(new Projectile());
+            spawnTimer = 0;
+        }
+
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            if (p.update()) projectiles.splice(i, 1);
+            else p.draw();
+        }
+
+        // Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, 3, 3);
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+        ctx.globalAlpha = 1;
+
+        frame++;
+        requestAnimationFrame(gameLoop);
+    }
+</script>
+</body>
+</html>
