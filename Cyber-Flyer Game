@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cyber-Flyer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Orbitron', sans-serif;
+            touch-action: manipulation;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #0a0a20, #020205);
+            box-shadow: 0 0 50px rgba(0, 242, 255, 0.1);
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            text-align: center;
+        }
+
+        .score-display {
+            position: absolute;
+            top: 20px;
+            font-size: 2.5rem;
+            font-weight: bold;
+            text-shadow: 0 0 10px #00f2ff;
+            z-index: 10;
+        }
+
+        .menu-card {
+            background: rgba(10, 10, 20, 0.9);
+            border: 2px solid #00f2ff;
+            padding: 2rem;
+            border-radius: 1rem;
+            pointer-events: auto;
+            box-shadow: 0 0 30px rgba(0, 242, 255, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn {
+            background: #00f2ff;
+            color: #000;
+            padding: 0.75rem 2rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            margin-top: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            border: none;
+        }
+
+        .btn:hover {
+            background: #fff;
+            box-shadow: 0 0 20px #00f2ff;
+            transform: scale(1.05);
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="score-display" id="score">0</div>
+
+    <div class="ui-overlay" id="start-menu">
+        <div class="menu-card">
+            <h1 class="text-4xl mb-4 text-cyan-400">CYBER-FLYER</h1>
+            <p class="mb-6 opacity-70">Navigiere die Drohne durch die Laser-Barrieren.</p>
+            <button class="btn" id="start-btn">Starten</button>
+            <p class="mt-4 text-xs opacity-50 text-white">[Leertaste, Klick oder Touch]</p>
+        </div>
+    </div>
+
+    <div class="ui-overlay hidden" id="game-over-menu">
+        <div class="menu-card">
+            <h2 class="text-3xl mb-2 text-red-500">SYSTEM-CRASH</h2>
+            <p class="text-xl mb-1">Score: <span id="final-score">0</span></p>
+            <p class="text-sm mb-6 opacity-70 text-cyan-300">Highscore: <span id="high-score">0</span></p>
+            <button class="btn" id="restart-btn">Reboot</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score');
+    const finalScoreElement = document.getElementById('final-score');
+    const highScoreElement = document.getElementById('high-score');
+    const startMenu = document.getElementById('start-menu');
+    const gameOverMenu = document.getElementById('game-over-menu');
+    const startBtn = document.getElementById('start-btn');
+    const restartBtn = document.getElementById('restart-btn');
+
+    // Game Constants
+    const GRAVITY = 0.25;
+    const JUMP = -5;
+    const PIPE_WIDTH = 60;
+    const PIPE_GAP = 180;
+    const PIPE_SPEED = 3;
+    const DRONE_SIZE = 34;
+
+    // Game State
+    let drone = { x: 50, y: 0, velocity: 0, width: DRONE_SIZE, height: DRONE_SIZE };
+    let pipes = [];
+    let score = 0;
+    let highScore = 0;
+    let isGameRunning = false;
+    let animationId;
+
+    // Resize Handling
+    function resize() {
+        canvas.width = Math.min(window.innerWidth, 600);
+        canvas.height = Math.min(window.innerHeight, 800);
+        drone.x = canvas.width / 4;
+        if (!isGameRunning) drawStatic();
+    }
+
+    function initGame() {
+        drone.y = canvas.height / 2;
+        drone.velocity = 0;
+        pipes = [];
+        score = 0;
+        scoreElement.textContent = '0';
+        spawnPipe();
+    }
+
+    function spawnPipe() {
+        const minHeight = 50;
+        const maxHeight = canvas.height - PIPE_GAP - minHeight;
+        const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+        
+        pipes.push({
+            x: canvas.width,
+            topHeight: topHeight,
+            passed: false
+        });
+    }
+
+    function drawDrone() {
+        ctx.save();
+        ctx.translate(drone.x + drone.width/2, drone.y + drone.height/2);
+        
+        // Rotation basierend auf Geschwindigkeit
+        let rotation = Math.min(Math.PI/4, Math.max(-Math.PI/4, drone.velocity * 0.1));
+        ctx.rotate(rotation);
+
+        // Drohnen-Körper (SVG-ähnlich gezeichnet)
+        ctx.fillStyle = '#00f2ff';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#00f2ff';
+        
+        // Hauptkörper
+        ctx.fillRect(-drone.width/2, -drone.height/6, drone.width, drone.height/3);
+        // "Kopf"
+        ctx.fillRect(-drone.width/4, -drone.height/2, drone.width/2, drone.height/2);
+        // Antennen/Flügel
+        ctx.strokeStyle = '#00f2ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-drone.width/2, 0);
+        ctx.lineTo(-drone.width/2 - 5, -10);
+        ctx.moveTo(drone.width/2, 0);
+        ctx.lineTo(drone.width/2 + 5, -10);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawPipes() {
+        pipes.forEach(pipe => {
+            // Neon-Effekt für Laser-Schranken
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#ff0055';
+            ctx.fillStyle = '#ff0055';
+
+            // Top Pipe
+            ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
+            // Bottom Pipe
+            const bottomY = pipe.topHeight + PIPE_GAP;
+            ctx.fillRect(pipe.x, bottomY, PIPE_WIDTH, canvas.height - bottomY);
+
+            // "Laser"-Linien an den Kanten
+            ctx.shadowBlur = 5;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
+            ctx.strokeRect(pipe.x, bottomY, PIPE_WIDTH, canvas.height - bottomY);
+        });
+    }
+
+    function update() {
+        if (!isGameRunning) return;
+
+        drone.velocity += GRAVITY;
+        drone.y += drone.velocity;
+
+        // Collision Check: Floor & Ceiling
+        if (drone.y + drone.height > canvas.height || drone.y < 0) {
+            endGame();
+        }
+
+        // Update Pipes
+        if (pipes.length > 0 && pipes[0].x < -PIPE_WIDTH) {
+            pipes.shift();
+        }
+
+        if (pipes[pipes.length - 1].x < canvas.width - 250) {
+            spawnPipe();
+        }
+
+        pipes.forEach(pipe => {
+            pipe.x -= PIPE_SPEED;
+
+            // Collision Check: Pipes
+            if (
+                drone.x + drone.width > pipe.x &&
+                drone.x < pipe.x + PIPE_WIDTH &&
+                (drone.y < pipe.topHeight || drone.y + drone.height > pipe.topHeight + PIPE_GAP)
+            ) {
+                endGame();
+            }
+
+            // Score update
+            if (!pipe.passed && drone.x > pipe.x + PIPE_WIDTH) {
+                pipe.passed = true;
+                score++;
+                scoreElement.textContent = score;
+                // Kleiner visueller Effekt beim Punktgewinn
+                scoreElement.style.transform = 'scale(1.2)';
+                setTimeout(() => scoreElement.style.transform = 'scale(1)', 100);
+            }
+        });
+
+        draw();
+        animationId = requestAnimationFrame(update);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Hintergrund-Gitter (Cyberpunk Style)
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.05)';
+        ctx.lineWidth = 1;
+        for(let i=0; i<canvas.width; i+=40) {
+            ctx.beginPath();
+            ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height);
+            ctx.stroke();
+        }
+        for(let i=0; i<canvas.height; i+=40) {
+            ctx.beginPath();
+            ctx.moveTo(0, i); ctx.lineTo(canvas.width, i);
+            ctx.stroke();
+        }
+
+        drawPipes();
+        drawDrone();
+    }
+
+    function drawStatic() {
+        draw();
+    }
+
+    function jump() {
+        if (isGameRunning) {
+            drone.velocity = JUMP;
+        }
+    }
+
+    function startGame() {
+        isGameRunning = true;
+        startMenu.classList.add('hidden');
+        gameOverMenu.classList.add('hidden');
+        initGame();
+        update();
+    }
+
+    function endGame() {
+        isGameRunning = false;
+        cancelAnimationFrame(animationId);
+        if (score > highScore) highScore = score;
+        
+        finalScoreElement.textContent = score;
+        highScoreElement.textContent = highScore;
+        gameOverMenu.classList.remove('hidden');
+    }
+
+    // Input Listeners
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') {
+            if (!isGameRunning && startMenu.classList.contains('hidden') === false) {
+                startGame();
+            } else if (!isGameRunning && !gameOverMenu.classList.contains('hidden')) {
+                startGame();
+            } else {
+                jump();
+            }
+            e.preventDefault();
+        }
+    });
+
+    canvas.addEventListener('touchstart', (e) => {
+        jump();
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('mousedown', jump);
+
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+
+    window.addEventListener('resize', resize);
+    
+    // Initialisierung
+    resize();
+
+</script>
+</body>
+</html>
