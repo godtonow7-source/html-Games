@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon-Beat: Easy Mode</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Orbitron', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            color: white;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: radial-gradient(circle at center, #101025 0%, #000 100%);
+        }
+
+        /* Bereich wo die Blöcke fallen */
+        #play-area {
+            flex: 1;
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            overflow: hidden;
+            border-left: 1px solid rgba(255,255,255,0.1);
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* Die großen Buttons unten */
+        #controls-container {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            height: 140px;
+            display: flex;
+            padding: 10px;
+            gap: 10px;
+            background: rgba(0,0,0,0.5);
+            border-top: 2px solid rgba(255,255,255,0.2);
+        }
+
+        .hit-button {
+            flex: 1;
+            height: 100%;
+            border-radius: 15px;
+            border: 3px solid white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            transition: all 0.1s;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .hit-button.active {
+            transform: scale(0.9);
+            filter: brightness(1.5);
+            box-shadow: 0 0 40px currentColor;
+        }
+
+        /* Die fallenden Blöcke */
+        .note {
+            position: absolute;
+            width: calc(25% - 15px);
+            height: 60px;
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(255,255,255,0.3);
+        }
+
+        .ui-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .menu-card {
+            background: #111;
+            border: 2px solid #00f2ff;
+            padding: 2rem;
+            border-radius: 20px;
+            text-align: center;
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- Score Anzeige -->
+    <div class="p-4 flex justify-between items-center">
+        <div class="text-cyan-400 font-bold">SCORE: <span id="score">0</span></div>
+        <div id="combo-tag" class="text-pink-500 font-bold opacity-0">COMBO!</div>
+    </div>
+
+    <!-- Hier fallen die Blöcke -->
+    <div id="play-area"></div>
+
+    <!-- Die Buttons -->
+    <div id="controls-container">
+        <div id="btn-0" class="hit-button" style="color: #00f2ff; border-color: #00f2ff;">D</div>
+        <div id="btn-1" class="hit-button" style="color: #a855f7; border-color: #a855f7;">F</div>
+        <div id="btn-2" class="hit-button" style="color: #ec4899; border-color: #ec4899;">J</div>
+        <div id="btn-3" class="hit-button" style="color: #eab308; border-color: #eab308;">K</div>
+    </div>
+
+    <!-- Menü -->
+    <div id="menu" class="ui-overlay">
+        <div class="menu-card">
+            <h1 class="text-2xl text-cyan-400 mb-6 font-bold">NEON BEAT: EASY</h1>
+            <p class="mb-6 opacity-70">Wähle ein Lied:</p>
+            <button onclick="startGame(120, 5, 'Cyber Mix')" class="w-full bg-cyan-500 text-black p-3 rounded mb-2 font-bold">CYBER MIX (Normal)</button>
+            <button onclick="startGame(160, 8, 'Electro Rush')" class="w-full bg-pink-500 text-black p-3 rounded font-bold">ELECTRO RUSH (Schnell)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const playArea = document.getElementById('play-area');
+    const scoreText = document.getElementById('score');
+    const comboTag = document.getElementById('combo-tag');
+    const menu = document.getElementById('menu');
+
+    const COLORS = ['#00f2ff', '#a855f7', '#ec4899', '#eab308'];
+    const NOTES = [261.63, 329.63, 392.00, 523.25];
+
+    let score = 0;
+    let combo = 0;
+    let activeNotes = [];
+    let isRunning = false;
+    let speed = 5;
+    let spawnRate = 600;
+    let lastSpawn = 0;
+
+    let audioCtx;
+    function initAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    function playNote(freq) {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+    }
+
+    function startGame(bpm, s, name) {
+        initAudio();
+        score = 0;
+        combo = 0;
+        speed = s;
+        spawnRate = (60 / bpm) * 1000;
+        activeNotes.forEach(n => n.el.remove());
+        activeNotes = [];
+        isRunning = true;
+        menu.classList.add('hidden');
+        scoreText.textContent = "0";
+        requestAnimationFrame(gameLoop);
+    }
+
+    function createNote() {
+        const lane = Math.floor(Math.random() * 4);
+        const el = document.createElement('div');
+        el.className = 'note';
+        el.style.backgroundColor = COLORS[lane];
+        el.style.borderColor = "white";
+        el.style.borderWidth = "2px";
+        el.style.left = `calc(${lane * 25}% + 7.5px)`;
+        el.style.top = '-70px';
+        playArea.appendChild(el);
+        
+        activeNotes.push({ el, lane, y: -70, hit: false });
+    }
+
+    function gameLoop(time) {
+        if (!isRunning) return;
+
+        if (time - lastSpawn > spawnRate) {
+            createNote();
+            lastSpawn = time;
+        }
+
+        activeNotes.forEach((note, i) => {
+            note.y += speed;
+            note.el.style.top = note.y + 'px';
+
+            // Wenn der Block unten aus dem Bild fällt
+            if (note.y > playArea.clientHeight) {
+                if (!note.hit) {
+                    combo = 0;
+                    comboTag.style.opacity = 0;
+                }
+                note.el.remove();
+                activeNotes.splice(i, 1);
+            }
+        });
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function checkHit(lane) {
+        if (!isRunning) return;
+
+        // Button Animation
+        const btn = document.getElementById(`btn-${lane}`);
+        btn.classList.add('active');
+        setTimeout(() => btn.classList.remove('active'), 100);
+
+        // Prüfe ob ein Block in der Nähe vom unteren Rand ist
+        const hitZone = playArea.clientHeight - 80;
+        let found = false;
+
+        for (let note of activeNotes) {
+            if (note.lane === lane && !note.hit) {
+                const diff = Math.abs(note.y - hitZone);
+                if (diff < 70) { // Toleranzbereich zum Treffen
+                    note.hit = true;
+                    note.el.style.opacity = '0';
+                    score += 10 + combo;
+                    combo++;
+                    scoreText.textContent = score;
+                    if (combo > 3) comboTag.style.opacity = 1;
+                    playNote(NOTES[lane]);
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found) {
+            combo = 0;
+            comboTag.style.opacity = 0;
+        }
+    }
+
+    // Steuerung
+    window.addEventListener('keydown', (e) => {
+        const keys = ['d', 'f', 'j', 'k'];
+        const idx = keys.indexOf(e.key.toLowerCase());
+        if (idx !== -1) checkHit(idx);
+    });
+
+    [0,1,2,3].forEach(i => {
+        const btn = document.getElementById(`btn-${i}`);
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            checkHit(i);
+        });
+        btn.addEventListener('mousedown', () => checkHit(i));
+    });
+
+</script>
+</body>
+</html>
